@@ -1,56 +1,123 @@
-const http = require('http');
+const http = require("http");
+const PORT = 5000;
 
 let users = [];
-let nextId = 1;
 
-const requestListener = (req, res) => {
+const server = http.createServer((req, res) => {
     const { method, url } = req;
-    let body = '';
+    // console.log(req);
+    const routeKey = `${method}:${url}`;
+    const routeAction = router[routeKey];
 
-    req.on('data', chunk => {
-        body += chunk.toString();
-    });
+    if (routeAction) {
+        routeAction(req, res);
+    } else {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ message: "Not Found" }));
+    }
+});
 
-    req.on('end', () => {
-        if (url === '/users' && method === 'GET') {
-            res.writeHead(200, {'Content-Type': 'application/json'});
-            res.end(JSON.stringify(users));
-        } else if (url === '/users' && method === 'POST') {
-            const { name, email } = JSON.parse(body);
-            if (!name || !email) {
-                res.writeHead(400, {'Content-Type': 'application/json'});
-                res.end(JSON.stringify({ message: 'Name and email are required' }));
-            } else {
-                const newUser = { id: nextId++, name, email };
-                users.push(newUser);
-                res.writeHead(201, {'Content-Type': 'application/json'});
-                res.end(JSON.stringify(newUser));
-            }
-        } else if (url.startsWith('/users/') && method === 'PUT') {
-            const id = parseInt(url.split('/')[2], 10);
-            const { name, email } = JSON.parse(body);
-            const userIndex = users.findIndex(user => user.id === id);
-            if (userIndex > -1) {
-                users[userIndex] = { ...users[userIndex], name, email };
-                res.writeHead(200, {'Content-Type': 'application/json'});
-                res.end(JSON.stringify(users[userIndex]));
-            } else {
-                res.writeHead(404, {'Content-Type': 'application/json'});
-                res.end(JSON.stringify({ message: 'User not found' }));
-            }
-        } else if (url.startsWith('/users/') && method === 'DELETE') {
-            const id = parseInt(url.split('/')[2], 10);
-            users = users.filter(user => user.id !== id);
-            res.writeHead(204, {'Content-Type': 'application/json'});
-            res.end();
-        } else {
-            res.writeHead(404, {'Content-Type': 'application/json'});
-            res.end(JSON.stringify({ message: 'Route not found' }));
-        }
-    });
+const router = {
+    'POST:/createUser': postCreateUser,
+    'GET:/getUser': getUser,
+    'PATCH:/updateUser': patchUpdateUser,
+    'DELETE:/deleteUser': deleteUser
 };
 
-const server = http.createServer(requestListener);
-server.listen(8082, () => {
-    console.log('Server is running on http://localhost:8082');
-}); 
+function postCreateUser(req, res) {
+    readRequestBody(req, (body) => {
+        const { email, password } = JSON.parse(body);
+        const emailRegex = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/;
+        const passRegex = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*#?&])[A-Za-z\d@$!%*#?&]{8,}$/;
+
+        if (!email || !password) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ message: "Email and password are required" }));
+            return;
+        }
+
+        if (!emailRegex.test(email) || !passRegex.test(password)) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ message: "Invalid email or password format" }));
+            return;
+        }
+
+        const userExists = users.some(user => user.email === email);
+        if (userExists) {
+            res.writeHead(409, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ message: "User already exists" }));
+            return;
+        }
+
+        users.push({ email, password });
+        res.writeHead(201), { 'Content-Type': 'application/json' };
+        res.end(JSON.stringify({ message: "User created successfully" }));
+    });
+}
+
+function getUser(req, res) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(users));
+}
+
+function patchUpdateUser(req, res) {
+    readRequestBody(req, (body) => {
+        const { email, newPassword } = JSON.parse(body);
+        const passRegex = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*#?&])[A-Za-z\d@$!%*#?&]{8,}$/;
+
+        if (!email || !newPassword) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ message: "Email and new password are required" }));
+            return;
+        }
+
+        if (!passRegex.test(newPassword)) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ message: "Invalid new password format" }));
+            return;
+        }
+
+        const userIndex = users.findIndex(user => user.email === email);
+        if (userIndex !== -1) {
+            users[userIndex].password = newPassword;
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ message: "Password updated successfully" }));
+        } else {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ message: "User not found" }));
+        }
+    });
+}
+
+function deleteUser(req, res) {
+    readRequestBody(req, (body) => {
+        const { email } = JSON.parse(body);
+
+        if (!email) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ message: "Email is required" }));
+            return;
+        }
+
+        const initialLength = users.length;
+        users = users.filter(user => user.email !== email);
+
+        if (users.length !== initialLength) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ message: "User deleted successfully" }));
+        } else {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ message: "User not found" }));
+        }
+    });
+}
+
+function readRequestBody(req, callback) {
+    let body = '';
+    req.on('data', chunk => body += chunk.toString());
+    req.on('end', () => callback(body));
+}
+
+server.listen(PORT, () => {
+    console.log(`Server is listening on http://localhost:${PORT}`);
+});
